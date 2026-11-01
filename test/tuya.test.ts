@@ -572,6 +572,82 @@ describe("lib/tuya", () => {
         });
     });
 
+    describe("JGQW01-63 (_TZE28C1000000_geabeatp)", () => {
+        // DP18 as reported by the device: over-current 40 A, over-voltage 270 V, under-voltage 170 V, group 8 not exposed
+        const dp18 = Buffer.from([1, 1, 0, 40, 3, 1, 1, 14, 4, 1, 0, 170, 8, 0, 0, 30]);
+
+        const resolve = async () => {
+            const device = mockDevice({modelID: "TS0601", manufacturerName: "_TZE28C1000000_geabeatp", endpoints: [{ID: 1}]});
+            const definition = await findByDevice(device);
+            return {device, definition};
+        };
+
+        const report = async (device: ReturnType<typeof mockDevice>, definition: Definition, dp: number, datatype: number, data: Buffer) => {
+            const msg = {
+                data: {dpValues: [{dp, datatype, data}]},
+                device,
+                endpoint: device.getEndpoint(1),
+                meta: {zclTransactionSequenceNumber: dp},
+                // biome-ignore lint/suspicious/noExplicitAny: generic
+            } as Fz.Message<any, any, any>;
+            return await tuya.fz.datapoints.convert(definition, msg, null, {}, {state: {}, device, deviceExposesChanged: () => {}});
+        };
+
+        it("reads voltage, current, power and power factor from DP 6", async () => {
+            const {device, definition} = await resolve();
+            expect(definition.model).toStrictEqual("JGQW01-63");
+            const dp6 = Buffer.from([2, 15, 9, 110, 0, 0, 177, 0, 0, 42, 0, 0, 0, 0, 0, 42, 99, 0]);
+            expect(await report(device, definition, 6, 0, dp6)).toStrictEqual({voltage: 241.4, current: 0.177, power: 42, power_factor: 99});
+        });
+
+        it("reads protection settings from DP 18", async () => {
+            const {device, definition} = await resolve();
+            expect(await report(device, definition, 18, 0, dp18)).toStrictEqual({
+                over_current_breaker: "ON",
+                over_current_threshold: 40,
+                over_voltage_breaker: "ON",
+                over_voltage_threshold: 270,
+                under_voltage_breaker: "ON",
+                under_voltage_threshold: 170,
+            });
+        });
+
+        it("writes the complete DP 18 frame with only the changed group patched", async () => {
+            const {device, definition} = await resolve();
+            await report(device, definition, 18, 0, dp18);
+            const endpoint = device.getEndpoint(1);
+            const meta: Tz.Meta = {
+                state: {},
+                device,
+                deviceExposesChanged: () => {},
+                message: {over_current_threshold: 25},
+                mapped: definition,
+                options: {},
+                publish: null,
+                endpoint_name: null,
+            };
+            await tuya.tz.datapoints.convertSet(endpoint, "over_current_threshold", 25, meta);
+            expect(endpoint.command).toHaveBeenLastCalledWith(
+                "manuSpecificTuya",
+                "dataRequest",
+                expect.objectContaining({
+                    dpValues: [{dp: 18, datatype: 0, data: Buffer.from([1, 1, 0, 25, 3, 1, 1, 14, 4, 1, 0, 170, 8, 0, 0, 30])}],
+                }),
+                expect.anything(),
+            );
+
+            await tuya.tz.datapoints.convertSet(endpoint, "under_voltage_breaker", "OFF", {...meta, message: {under_voltage_breaker: "OFF"}});
+            expect(endpoint.command).toHaveBeenLastCalledWith(
+                "manuSpecificTuya",
+                "dataRequest",
+                expect.objectContaining({
+                    dpValues: [{dp: 18, datatype: 0, data: Buffer.from([1, 1, 0, 25, 3, 1, 1, 14, 4, 0, 0, 170, 8, 0, 0, 30])}],
+                }),
+                expect.anything(),
+            );
+        });
+    });
+
     describe("TS004F knob configure (ZG-101ZD)", () => {
         // https://github.com/Koenkk/zigbee2mqtt/issues/31917
         const unsupported = () => new Error("ZCL command genBasic.read(...) failed (Status 'UNSUPPORTED_ATTRIBUTE')");

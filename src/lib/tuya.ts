@@ -2113,6 +2113,51 @@ export const valueConverter = {
             return encodeThresholds(vEncoded, meta.state.alarm_set_2 || {}, alarmSet2ThresholdDefinitions);
         },
     },
+    // Same layout as threshold_3 (groups of [id, enabled, value(2)]), but the full frame is written back:
+    // the last reported frame is kept and only the changed group is patched, so groups that are not
+    // exposed (e.g. 8) are sent back unchanged.
+    threshold_9: (key?: string) => {
+        const ids: KeyValue = {1: "over_current", 3: "over_voltage", 4: "under_voltage"};
+        const storeKey = "threshold_9_frame";
+        return {
+            from: (v: Buffer, meta: Fz.Meta) => {
+                globalStore.putValue(meta.device, storeKey, Buffer.from(v));
+                const result: KeyValue = {};
+                for (let i = 0; i + 4 <= v.length; i += 4) {
+                    const name = ids[v[i]];
+                    if (!name) continue;
+                    result[`${name}_breaker`] = v[i + 1] === 1 ? "ON" : "OFF";
+                    result[`${name}_threshold`] = v.readUInt16BE(i + 2);
+                }
+                return result;
+            },
+            to: (v: string | number, meta: Tz.Meta) => {
+                const stored: Buffer | undefined = globalStore.getValue(meta.device, storeKey);
+                if (!stored) {
+                    meta.device
+                        .getEndpoint(1)
+                        .command("manuSpecificTuya", "dataQuery", {}, {disableDefaultResponse: true})
+                        .catch(() => {});
+                    throw new Error("Protection settings not received from the device yet, try again in a few seconds");
+                }
+                const name = key.replace(/_(breaker|threshold)$/, "");
+                const id = Number(Object.keys(ids).find((k) => ids[k] === name));
+                const buf = Buffer.from(stored);
+                let offset = -1;
+                for (let i = 0; i + 4 <= buf.length; i += 4) {
+                    if (buf[i] === id) offset = i;
+                }
+                if (offset === -1) throw new Error(`Device did not report '${key}'`);
+                if (key.endsWith("_breaker")) {
+                    buf[offset + 1] = utils.getFromLookup(v, {on: 1, off: 0});
+                } else {
+                    buf.writeUInt16BE(utils.toNumber(v, key), offset + 2);
+                }
+                globalStore.putValue(meta.device, storeKey, buf);
+                return [...buf];
+            },
+        };
+    },
     selfTestResult: valueConverterBasic.lookup({checking: 0, success: 1, failure: 2, others: 3}),
     lockUnlock: valueConverterBasic.lookup({LOCK: true, UNLOCK: false}),
     thermostatHolidayStartStop: {

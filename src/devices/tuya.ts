@@ -2937,6 +2937,87 @@ export const definitions: DefinitionWithExtend[] = [
         },
     },
     {
+        fingerprint: tuya.fingerprint("TS0601", ["_TZE28C1000000_geabeatp"]),
+        model: "JGQW01-63",
+        vendor: "Tuya",
+        description: "DIN rail circuit breaker with energy meter and display",
+        extend: [tuya.modernExtend.tuyaBase({dp: true, timeStart: "1970"})],
+        configure: async (device, coordinatorEndpoint) => {
+            // The device never sends a default response to dataQuery, it only reports all datapoints
+            await device.getEndpoint(1).command("manuSpecificTuya", "dataQuery", {}, {disableDefaultResponse: true});
+        },
+        exposes: [
+            e.switch().setAccess("state", ea.STATE_SET),
+            e.energy(),
+            e.voltage(),
+            e.current(),
+            e.power(),
+            e.power_factor().withUnit("%"),
+            e.ac_frequency(),
+            e.temperature(),
+            e.binary("over_current_breaker", ea.STATE_SET, "ON", "OFF").withDescription("Over-current protection"),
+            e
+                .numeric("over_current_threshold", ea.STATE_SET)
+                .withValueMin(1)
+                .withValueMax(63)
+                .withUnit("A")
+                .withDescription("Over-current threshold"),
+            e.binary("over_voltage_breaker", ea.STATE_SET, "ON", "OFF").withDescription("Over-voltage protection"),
+            e
+                .numeric("over_voltage_threshold", ea.STATE_SET)
+                .withValueMin(230)
+                .withValueMax(300)
+                .withUnit("V")
+                .withDescription("Over-voltage threshold"),
+            e.binary("under_voltage_breaker", ea.STATE_SET, "ON", "OFF").withDescription("Under-voltage protection"),
+            e
+                .numeric("under_voltage_threshold", ea.STATE_SET)
+                .withValueMin(100)
+                .withValueMax(220)
+                .withUnit("V")
+                .withDescription("Under-voltage threshold"),
+            e.binary("lcd_switch", ea.STATE_SET, "ON", "OFF").withDescription("LCD display"),
+            e.numeric("power_on_delay", ea.STATE_SET).withValueMin(0).withValueMax(999).withUnit("s").withDescription("Power-on delay"),
+            e
+                .numeric("over_voltage_recovery_time", ea.STATE_SET)
+                .withValueMin(0)
+                .withValueMax(999)
+                .withUnit("s")
+                .withDescription("Recovery time after over/under-voltage"),
+        ],
+        meta: {
+            tuyaDatapoints: [
+                [1, "energy", tuya.valueConverter.divideBy100],
+                [
+                    6,
+                    null,
+                    {
+                        // [?, ?, voltage(2) 0.1 V, current(3) mA, active power(3) W, ..., power factor(1) %]
+                        from: (v: Buffer) => ({
+                            voltage: v.readUInt16BE(2) / 10,
+                            current: v.readUIntBE(4, 3) / 1000,
+                            power: v.readUIntBE(7, 3),
+                            power_factor: v[16],
+                        }),
+                    },
+                ],
+                [16, "state", tuya.valueConverter.onOff],
+                [18, null, tuya.valueConverter.threshold_9()],
+                [18, "over_current_threshold", tuya.valueConverter.threshold_9("over_current_threshold")],
+                [18, "over_current_breaker", tuya.valueConverter.threshold_9("over_current_breaker")],
+                [18, "over_voltage_threshold", tuya.valueConverter.threshold_9("over_voltage_threshold")],
+                [18, "over_voltage_breaker", tuya.valueConverter.threshold_9("over_voltage_breaker")],
+                [18, "under_voltage_threshold", tuya.valueConverter.threshold_9("under_voltage_threshold")],
+                [18, "under_voltage_breaker", tuya.valueConverter.threshold_9("under_voltage_breaker")],
+                [32, "ac_frequency", tuya.valueConverter.divideBy100],
+                [47, "temperature", tuya.valueConverter.divideBy10],
+                [101, "lcd_switch", tuya.valueConverter.onOff],
+                [102, "over_voltage_recovery_time", tuya.valueConverter.raw],
+                [104, "power_on_delay", tuya.valueConverter.raw],
+            ],
+        },
+    },
+    {
         fingerprint: tuya.fingerprint("TS0601", ["_TZE284_zofmmt9s"]),
         model: "ZSM-01",
         vendor: "Novato",
